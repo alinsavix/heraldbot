@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,11 +58,16 @@ func check(e error) {
 
 var BotID string
 
-type bc struct {
-	GuildName   string
-	GuildId     string
+type ChannelInfo struct {
+	Guild       *GuildInfo
 	ChannelName string
 	ChannelId   string
+	IsPrivate   bool
+}
+
+type GuildInfo struct {
+	GuildName string
+	GuildId   string
 }
 
 type cn struct {
@@ -68,8 +75,14 @@ type cn struct {
 	ChannelName string
 }
 
-var channelsById = map[string]*bc{}
-var channelsByName = map[cn]*bc{}
+var channelsById = map[string]*ChannelInfo{}
+var channelsByName = map[cn]*ChannelInfo{}
+var guildsById = map[string]*GuildInfo{}
+var guildsByName = map[string]*GuildInfo{}
+
+var validChannels = map[cn]bool{
+	cn{"WWP", "general"}: true,
+}
 
 var dg *discordgo.Session
 
@@ -106,6 +119,18 @@ func main() {
 	//	spew.Dump(a)
 
 	// _, _ = dg.ChannelMessageSend("306187245986119691", "HeraldBot reporting for duty!")
+	time.Sleep(2 * time.Second)
+	// spew.Dump(channelsByName)
+	q := getChannelByName("WWP", "general")
+	if q == nil {
+		fmt.Printf("Couldn't find channel to emote to\n")
+		os.Exit(1)
+	}
+	fmt.Printf("Trying to write to channel id %s\n", q.ChannelId)
+	_, _ = dg.ChannelMessageSend(q.ChannelId, "Hi")
+	_, _ = dg.ChannelMessageSend("306187245986119691", "https://www.youtube.com/watch?v=CEH2HyVnKQM")
+
+	// spew.Dump(channelsById)
 
 	fmt.Printf("Bot running, press CTRL-C to exit\n")
 	c := make(chan os.Signal, 2)
@@ -114,6 +139,75 @@ func main() {
 	<-c
 	cleanup()
 	return
+}
+
+func getGuildById(gid string) *GuildInfo {
+	if g, ok := guildsById[gid]; ok {
+		return g
+	}
+
+	if gid == "" {
+		gi := &GuildInfo{
+			GuildId:   "",
+			GuildName: "",
+		}
+
+		return gi
+	}
+
+	g, err := dg.Guild(gid)
+	if err != nil {
+		fmt.Printf("getGuildById couldn't get guild info for guild id %s\n", gid)
+		return nil
+	}
+
+	gi := &GuildInfo{
+		GuildId:   gid,
+		GuildName: g.Name,
+	}
+
+	guildsById[gid] = gi
+	guildsByName[g.Name] = gi
+
+	return gi
+}
+
+func getChannelByName(guild string, channel string) *ChannelInfo {
+	if c, ok := channelsByName[cn{guild, channel}]; ok {
+		return c
+	}
+
+	return nil
+}
+
+func getChannelById(cid string) *ChannelInfo {
+	if c, ok := channelsById[cid]; ok {
+		return c
+	}
+
+	c, err := dg.Channel(cid)
+	if err != nil {
+		fmt.Printf("getChannelById couldn't get channel info for channel id %s\n", cid)
+		return nil
+	}
+
+	g := getGuildById(c.GuildID)
+	if g == nil {
+		fmt.Printf("Couldn't get guild info for channel")
+		return nil
+	}
+
+	ci := &ChannelInfo{
+		Guild:       g,
+		ChannelId:   cid,
+		ChannelName: c.Name,
+		IsPrivate:   c.IsPrivate,
+	}
+
+	channelsById[cid] = ci
+	channelsByName[cn{g.GuildName, ci.ChannelName}] = ci
+
+	return ci
 }
 
 func doGuild(g *discordgo.Guild) {
@@ -125,7 +219,19 @@ func doGuild(g *discordgo.Guild) {
 		}
 
 		fmt.Printf("  Identified channel '%s' (id=%s)\n", c.Name, c.ID)
-		ch := &bc{g.ID, g.Name, c.ID, c.Name}
+
+		// This is pretty sloppy, but it'll do for now
+
+		gi := getGuildById(g.ID)
+		ci := getChannelById(c.ID)
+
+		ch := &ChannelInfo{
+			Guild:       gi,
+			ChannelId:   ci.ChannelId,
+			ChannelName: ci.ChannelName,
+			IsPrivate:   false,
+		}
+
 		channelsById[c.ID] = ch
 		channelsByName[cn{g.Name, c.Name}] = ch
 	}
@@ -156,22 +262,71 @@ func guildCreate(s *discordgo.Session, g *discordgo.GuildCreate) {
 	//	spew.Dump(channelsByName)
 }
 
+var reChannelMsgToMe = regexp.MustCompile(`(?i)^\s*(!herald)(?:bot)?$`)
+
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == BotID {
 		return
 	}
 
-	fmt.Printf("Handling MessageCreate event\n")
+	c := getChannelById(m.ChannelID)
 
-	if m.Content == "ping" {
-		_ = s.ChannelTyping("306187245986119691")
-		time.Sleep(1000 * time.Millisecond)
-		_, _ = s.ChannelMessageSend(m.ChannelID, "Pong!")
+	var priv string
+	if c.IsPrivate == true {
+		priv = " (private)"
+	}
+	fmt.Printf("Handling MessageCreate event, channel: %s%s\n", m.ChannelID, priv)
+
+	// fmt.Printf("Handling MessageCreate event\n")
+	//	spew.Dump(m)
+	// z, _ := dg.Channel(m.ChannelID)
+	// spew.Dump(z)
+	// spew.Dump(channelsById)
+
+	var cmd string
+	var remain string
+
+	split := strings.SplitN(m.Content, " ", 3)
+
+	if c.IsPrivate == true {
+		//		fmt.Printf("Message on private channel")
+
+		if len(split) >= 1 {
+			cmd = strings.ToLower(split[0])
+		}
+		if len(split) >= 2 {
+			remain = split[1]
+		}
+	} else {
+		if reChannelMsgToMe.MatchString(split[0]) {
+			// fmt.Printf("Message to %s, cmd: %s, remain: %s\n", split[0], split[1], split[2])
+			if len(split) >= 2 {
+				cmd = strings.ToLower(split[1])
+			}
+
+			if len(split) >= 3 {
+				remain = split[2]
+			}
+		} else {
+			return
+		}
 	}
 
-	if m.Content == "pong" {
-		_, _ = s.ChannelMessageSend(m.ChannelID, "Ping!")
+	if f, ok := commandTable[cmd]; ok {
+		f(s, m, cmd, remain)
 	}
+
+	// _ = remain
+
+	// if cmd == "ping" {
+	// 	// _ = s.ChannelTyping("306187245986119691")
+	// 	// time.Sleep(1000 * time.Millisecond)
+	// 	_, _ = s.ChannelMessageSend(m.ChannelID, "Pong!")
+	// }
+
+	// if cmd == "pong" {
+	// 	_, _ = s.ChannelMessageSend(m.ChannelID, "Ping!")
+	// }
 
 	// fmt.Printf("%20s %20s %20s > %s\n", m.ChannelID, time.Now().Format(time.Stamp),
 	// 	m.Author.Username, m.Content)
@@ -181,4 +336,24 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	//	g, _ := s.Guild(z.GuildID)
 	//	spew.Dump(g)
+}
+
+type commandHandler func(*discordgo.Session, *discordgo.MessageCreate, string, string)
+
+var commandTable = map[string]commandHandler{
+	"ping": cmdPing,
+	"pong": cmdPong,
+	"help": cmdHelp,
+}
+
+func cmdPing(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
+	_, _ = s.ChannelMessageSend(m.ChannelID, "Pong!")
+}
+
+func cmdPong(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
+	_, _ = s.ChannelMessageSend(m.ChannelID, "Ping!")
+}
+
+func cmdHelp(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
+	_, _ = s.ChannelMessageSend(m.ChannelID, "Sorry, but I am helpless so far.")
 }
