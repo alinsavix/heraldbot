@@ -12,6 +12,8 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+var version string
+
 func check(e error) {
 	if e != nil {
 		panic(e)
@@ -96,6 +98,8 @@ func cleanup() {
 
 func main() {
 	var err error
+
+	fmt.Printf("HeraldBot %s starting up...\n", version)
 
 	dg, err = discordgo.New("Bot " + "MzA2MTg1ODk0NjkwMjkxNzE0.C-AZyA.JzWpgczE7vumYuwE_6f_5Is4MDo")
 	check(err)
@@ -238,7 +242,7 @@ func doGuild(g *discordgo.Guild) {
 }
 
 func readyEvent(s *discordgo.Session, r *discordgo.Ready) {
-	fmt.Printf("Handling Ready event\n")
+	fmt.Printf("Handling 'Ready' event\n")
 	// fmt.Printf("One: \n")
 	// spew.Dump(r)
 	// fmt.Printf("Two: \n")
@@ -256,7 +260,7 @@ func readyEvent(s *discordgo.Session, r *discordgo.Ready) {
 }
 
 func guildCreate(s *discordgo.Session, g *discordgo.GuildCreate) {
-	fmt.Printf("Handling GuildCreate event\n")
+	fmt.Printf("Handling 'GuildCreate' event\n")
 	doGuild(g.Guild)
 	//	spew.Dump(channelsById)
 	//	spew.Dump(channelsByName)
@@ -275,7 +279,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if c.IsPrivate == true {
 		priv = " (private)"
 	}
-	fmt.Printf("Handling MessageCreate event, channel: %s%s\n", m.ChannelID, priv)
+	fmt.Printf("Handling 'MessageCreate' event, channel: %s%s\n", m.ChannelID, priv)
 
 	// fmt.Printf("Handling MessageCreate event\n")
 	//	spew.Dump(m)
@@ -355,5 +359,7 @@ func cmdPong(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remai
 }
 
 func cmdHelp(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	_, _ = s.ChannelMessageSend(m.ChannelID, "Sorry, but I am helpless so far.")
+	msg := fmt.Sprintf("Heraldbot **%s** reporting for duty!\n\n"+
+		"Sorry, but so far, I am helpless.\n", version)
+	_, _ = s.ChannelMessageSend(m.ChannelID, msg)
 }
