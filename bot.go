@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/davecgh/go-spew/spew"
 )
 
 var version string
@@ -342,24 +343,41 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	//	spew.Dump(g)
 }
 
+func sendFormatted(s *discordgo.Session, cid string, format string, vals ...interface{}) {
+	_, err := s.ChannelMessageSend(cid, fmt.Sprintf(format, vals...))
+	if err != nil {
+		fmt.Printf("sendFormatted: Failed to send message: %s\n", err)
+	}
+}
+
 type commandHandler func(*discordgo.Session, *discordgo.MessageCreate, string, string)
 
 var commandTable = map[string]commandHandler{
-	"ping": cmdPing,
-	"pong": cmdPong,
-	"help": cmdHelp,
+	"ping":  cmdPing,
+	"pong":  cmdPong,
+	"help":  cmdHelp,
+	"debug": cmdDebug,
 }
 
 func cmdPing(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	_, _ = s.ChannelMessageSend(m.ChannelID, "Pong!")
+	sendFormatted(s, m.ChannelID, "Pong!")
 }
 
 func cmdPong(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	_, _ = s.ChannelMessageSend(m.ChannelID, "Ping!")
+	sendFormatted(s, m.ChannelID, "Ping!")
 }
 
 func cmdHelp(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	msg := fmt.Sprintf("Heraldbot **%s** reporting for duty!\n\n"+
+	sendFormatted(s, m.ChannelID, "HeraldBot **%s** reporting for duty!\n\n"+
 		"Sorry, but so far, I am helpless.\n", version)
-	_, _ = s.ChannelMessageSend(m.ChannelID, msg)
+}
+
+func cmdDebug(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
+	//    msg := fmt.Sprintf("Debug output for HeraldBot **%s**\n\n", version)
+	//	_, _ = s.ChannelMessageSend(m.ChannelID, "Ping!")
+	sendFormatted(s, m.ChannelID, "Debug for %s\n\n", version)
+	sendFormatted(s, m.ChannelID, "```Go\n%s\n```\n", spew.Sdump(m))
+	//    sendFormatted(s, m.ChannelID, "```\n%s\n```\n", sspew.Sprint(m))
+
+	spew.Dump(m)
 }
