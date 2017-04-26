@@ -294,8 +294,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	split := strings.SplitN(m.Content, " ", 3)
 
 	if c.IsPrivate == true {
-		//		fmt.Printf("Message on private channel")
-
 		if len(split) >= 1 {
 			cmd = strings.ToLower(split[0])
 		}
@@ -303,17 +301,24 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			remain = split[1]
 		}
 	} else {
-		if reChannelMsgToMe.MatchString(split[0]) {
-			// fmt.Printf("Message to %s, cmd: %s, remain: %s\n", split[0], split[1], split[2])
-			if len(split) >= 2 {
-				cmd = strings.ToLower(split[1])
-			}
-
-			if len(split) >= 3 {
-				remain = split[2]
-			}
-		} else {
+		// Not private -- is it on a channel we monitor?
+		ch := cn{c.Guild.GuildName, c.ChannelName}
+		if _, ok := validChannels[ch]; !ok {
+			fmt.Printf("Recieved message on unwatched channel: %s:%s\n",
+				c.Guild.GuildName, c.ChannelName)
 			return
+		}
+
+		if !reChannelMsgToMe.MatchString(split[0]) {
+			return
+		}
+		// fmt.Printf("Message to %s, cmd: %s, remain: %s\n", split[0], split[1], split[2])
+		if len(split) >= 2 {
+			cmd = strings.ToLower(split[1])
+		}
+
+		if len(split) >= 3 {
+			remain = split[2]
 		}
 	}
 
