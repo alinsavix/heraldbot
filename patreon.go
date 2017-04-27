@@ -150,24 +150,26 @@ func watchPatreon() {
 	}
 	defer db.Close()
 
-	_ = posts
-
 	count := 0
 	for _, p := range posts {
 		check, err := patreonDbCheck(db, p)
 		if err == nil && check == false {
 			patreonDbSet(db, p)
-			fmt.Printf("haven't seen id %s before\n", p)
-			sendFormatted(dg, getChannelByName("WWP", "general").ChannelId,
-				"Hear ye, hear ye, there is a new Patreon community wall post:\n"+
-					"https://www.patreon.com/posts/%s", p)
+			fmt.Fprintf(os.Stderr, "Haven't seen post id %s before, announcing\n", p)
+			for _, ch := range announceChannels {
+				sendFormatted(dg, getChannelByName(ch.GuildName, ch.ChannelName).ChannelId,
+					"Hear ye, hear ye, there is a new Patreon community wall post:\n"+
+						"https://www.patreon.com/posts/%s", p)
+			}
 			count++
 		}
 	}
 
 	if count == 0 {
-		sendFormatted(dg, getChannelByName("WWP", "general").ChannelId,
-			"No new Patreon community posts to report!")
+		for _, ch := range announceChannels {
+			sendFormatted(dg, getChannelByName(ch.GuildName, ch.ChannelName).ChannelId,
+				"No new Patreon community posts to report!")
+		}
 	}
 }
 

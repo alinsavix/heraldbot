@@ -21,44 +21,6 @@ func check(e error) {
 	}
 }
 
-// import (
-// 	"encoding/json"
-// 	"fmt"
-// 	"io/ioutil"
-// 	"net/http"
-// 	"os"
-
-// 	"github.com/davecgh/go-spew/spew"
-// )
-
-// var url = `https://api.patreon.com/stream?include=user.null%2Cattachments.null%2Cuser_defined_tags.null%2Ccampaign.earnings_visibility%2Cpoll&fields[post]=change_visibility_at%2Ccomment_count%2Ccontent%2Ccurrent_user_can_delete%2Ccurrent_user_can_view%2Ccurrent_user_has_liked%2Cearly_access_min_cents%2Cembed%2Cimage%2Cis_paid%2Clike_count%2Cmin_cents_pledged_to_view%2Cpost_file%2Cpublished_at%2Cpatron_count%2Cpatreon_url%2Cpost_type%2Cpledge_url%2Cthumbnail_url%2Ctitle%2Cupgrade_url%2Curl&fields[user]=image_url%2Cfull_name%2Curl&fields[campaign]=earnings_visibility&page[cursor]=null&filter[is_by_creator]=false&filter[is_following]=false&filter[contains_exclusive_posts]=false&filter[creator_id]=136449&json-api-version=1.0`
-
-// func main() {
-// 	resp, err := http.Get(url)
-// 	if err != nil {
-// 		fmt.Fprintf(os.Stderr, "fetch: %v\n", err)
-// 		os.Exit(1)
-// 	}
-
-// 	b, err := ioutil.ReadAll(resp.Body)
-// 	resp.Body.Close()
-
-// 	if err != nil {
-// 		fmt.Fprintf(os.Stderr, "fetch: reading: %v\n", err)
-// 		os.Exit(1)
-// 	}
-
-// 	// fmt.Printf("%s", b)
-
-// 	var zot interface{}
-// 	err = json.Unmarshal(b, &zot)
-
-// 	// fmt.Printf("%#v\n", zot)
-
-// 	zotzot := zot.(map[string]interface{})
-// 	spew.Dump(zotzot["data"])
-// }
-
 var BotID string
 
 type ChannelInfo struct {
@@ -78,15 +40,27 @@ type cn struct {
 	ChannelName string
 }
 
+type un struct {
+	UserName string
+	UserDisc string
+}
+
 var channelsById = map[string]*ChannelInfo{}
 var channelsByName = map[cn]*ChannelInfo{}
 var guildsById = map[string]*GuildInfo{}
 var guildsByName = map[string]*GuildInfo{}
 
 var validChannels = map[cn]bool{
-	cn{"WWP", "general"}: true,
+// cn{"WWP", "general"}: true,
 }
 
+var validAdmins = map[un]bool{
+// ch{"Alinsa", "1234"}: true,
+}
+
+var announceChannels = []cn{
+// cn{"WWP", "general"},
+}
 var dg *discordgo.Session
 
 func cleanup() {
@@ -99,10 +73,14 @@ func cleanup() {
 
 func main() {
 	var err error
+	initopts()
+
+	if version == "" {
+		version = "[unknown version]"
+	}
 
 	fmt.Printf("HeraldBot %s starting up...\n", version)
-
-	dg, err = discordgo.New("Bot " + "MzA2MTg1ODk0NjkwMjkxNzE0.C-AZyA.JzWpgczE7vumYuwE_6f_5Is4MDo")
+	dg, err = discordgo.New("Bot " + opts.Token)
 	check(err)
 
 	err = dg.Open()
@@ -270,6 +248,14 @@ func guildCreate(s *discordgo.Session, g *discordgo.GuildCreate) {
 	//	spew.Dump(channelsByName)
 }
 
+func checkAdmin(user un) bool {
+	if _, ok := validAdmins[user]; ok {
+		return true
+	}
+
+	return false
+}
+
 var reChannelMsgToMe = regexp.MustCompile(`(?i)^\s*(!herald)(?:bot)?$`)
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -315,7 +301,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if !reChannelMsgToMe.MatchString(split[0]) {
 			return
 		}
-		// fmt.Printf("Message to %s, cmd: %s, remain: %s\n", split[0], split[1], split[2])
+
 		if len(split) >= 2 {
 			cmd = strings.ToLower(split[1])
 		}
@@ -326,29 +312,15 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if f, ok := commandTable[cmd]; ok {
-		f(s, m, cmd, remain)
+		if f.adminOnly == true && !checkAdmin(un{m.Author.Username, m.Author.Discriminator}) {
+			fmt.Fprintf(os.Stderr, "Priv'd command %s attempted by unpriv'd user %s#%s\n",
+				cmd, m.Author.Username, m.Author.Discriminator)
+			return
+		}
+		f.handler(s, m, cmd, remain)
 	}
 
-	// _ = remain
-
-	// if cmd == "ping" {
-	// 	// _ = s.ChannelTyping("306187245986119691")
-	// 	// time.Sleep(1000 * time.Millisecond)
-	// 	_, _ = s.ChannelMessageSend(m.ChannelID, "Pong!")
-	// }
-
-	// if cmd == "pong" {
-	// 	_, _ = s.ChannelMessageSend(m.ChannelID, "Ping!")
-	// }
-
-	// fmt.Printf("%20s %20s %20s > %s\n", m.ChannelID, time.Now().Format(time.Stamp),
-	// 	m.Author.Username, m.Content)
-	//	spew.Dump(m)
-	//	z, _ := s.Channel(m.ChannelID)
-	//	spew.Dump(z)
-
-	//	g, _ := s.Guild(z.GuildID)
-	//	spew.Dump(g)
+	return
 }
 
 func sendFormatted(s *discordgo.Session, cid string, format string, vals ...interface{}) {
@@ -359,13 +331,17 @@ func sendFormatted(s *discordgo.Session, cid string, format string, vals ...inte
 }
 
 type commandHandler func(*discordgo.Session, *discordgo.MessageCreate, string, string)
+type commandEntry struct {
+	handler   commandHandler
+	adminOnly bool
+}
 
-var commandTable = map[string]commandHandler{
-	"ping":    cmdPing,
-	"pong":    cmdPong,
-	"help":    cmdHelp,
-	"debug":   cmdDebug,
-	"patreon": cmdPatreon,
+var commandTable = map[string]commandEntry{
+	"ping":    {cmdPing, false},
+	"pong":    {cmdPong, false},
+	"help":    {cmdHelp, false},
+	"debug":   {cmdDebug, true},
+	"patreon": {cmdPatreon, true},
 }
 
 func cmdPing(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
@@ -388,7 +364,7 @@ func cmdDebug(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, rema
 	sendFormatted(s, m.ChannelID, "```Go\n%s\n```\n", spew.Sdump(m))
 	//    sendFormatted(s, m.ChannelID, "```\n%s\n```\n", sspew.Sprint(m))
 
-	spew.Dump(m)
+	// spew.Dump(m)
 }
 
 func cmdPatreon(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
