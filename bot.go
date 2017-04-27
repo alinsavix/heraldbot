@@ -71,6 +71,27 @@ func cleanup() {
 	}
 }
 
+var discordReady = false
+
+func tryOpen(d *discordgo.Session) bool {
+	fmt.Fprintf(os.Stderr, "Attempting connection to discord...")
+
+	err := d.Open()
+	check(err)
+
+	for i := 0; i <= 5; i++ {
+		time.Sleep(1 * time.Second)
+		if discordReady == true {
+			fmt.Fprintf(os.Stderr, "success\n")
+			return true
+		}
+	}
+
+	d.Close()
+	fmt.Fprintf(os.Stderr, "failed\n")
+	return false
+}
+
 func main() {
 	var err error
 	initopts()
@@ -83,40 +104,40 @@ func main() {
 	dg, err = discordgo.New("Bot " + opts.Token)
 	check(err)
 
-	err = dg.Open()
-	check(err)
-
-	u, err := dg.User("@me")
-	check(err)
-
-	//	spew.Dump(dg)
-
-	BotID = u.ID
-
-	// time.Sleep(1000 * time.Millisecond)
 	dg.AddHandler(readyEvent)
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(guildCreate)
 
-	//	a, err := dg.Applications()
-	//	spew.Dump(a)
+	// err = dg.Open()
+	// check(err)
 
-	time.Sleep(2 * time.Second)
-	// spew.Dump(channelsByName)
-	q := getChannelByName("WWP", "general")
-	if q == nil {
-		fmt.Printf("Couldn't find channel to emote to\n")
+	for i := 0; i <= 10; i++ {
+		if tryOpen(dg) {
+			break
+		} else {
+			fmt.Fprintf(os.Stderr, "Didn't get a Ready frame from discord in a reasonable time\n")
+		}
+	}
+
+	if discordReady == false {
+		fmt.Fprintf(os.Stderr, "Couldn't connect to Discord after many retries, exiting.\n")
 		os.Exit(1)
 	}
-	fmt.Printf("Trying to write to channel id %s\n", q.ChannelId)
-	sendFormatted(dg, q.ChannelId, "HeraldBot **%s** reporting for duty!", version)
 
-	// _, _ = dg.ChannelMessageSend(q.ChannelId, "Hi")
-	// _, _ = dg.ChannelMessageSend("306187245986119691", "https://www.youtube.com/watch?v=CEH2HyVnKQM")
+	u, err := dg.User("@me")
+	check(err)
 
-	// spew.Dump(channelsById)
+	BotID = u.ID
 
-	fmt.Printf("Bot running, press CTRL-C to exit\n")
+	// q := getChannelByName("WWP", "general")
+	// if q == nil {
+	// 	fmt.Printf("Couldn't find channel to emote to\n")
+	// 	os.Exit(1)
+	// }
+	// fmt.Printf("Trying to write to channel id %s\n", q.ChannelId)
+	// sendFormatted(dg, q.ChannelId, "HeraldBot **%s** reporting for duty!", version)
+
+	fmt.Fprintf(os.Stderr, "Bot running, press CTRL-C to exit\n")
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
@@ -229,6 +250,7 @@ func readyEvent(s *discordgo.Session, r *discordgo.Ready) {
 	// spew.Dump(r)
 	// fmt.Printf("Two: \n")
 	// spew.Dump(r.Guilds)
+	discordReady = true
 	for _, g := range r.Guilds {
 		// spew.Dump(g)
 		if g.Name == "" || g.ID == "" {
