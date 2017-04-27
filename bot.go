@@ -137,6 +137,7 @@ func main() {
 	// fmt.Printf("Trying to write to channel id %s\n", q.ChannelId)
 	// sendFormatted(dg, q.ChannelId, "HeraldBot **%s** reporting for duty!", version)
 
+	go patreonWatch()
 	fmt.Fprintf(os.Stderr, "Bot running, press CTRL-C to exit\n")
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -145,7 +146,7 @@ func main() {
 
 	<-c
 	cleanup()
-	return
+	os.Exit(0)
 }
 
 func getGuildById(gid string) *GuildInfo {
@@ -397,5 +398,5 @@ func cmdDie(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain
 }
 
 func cmdPatreon(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	watchPatreon()
+	patreonCheck(false)
 }

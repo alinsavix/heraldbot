@@ -7,11 +7,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 // Stolen from debugging info on the patreon webpage. Will probably change
@@ -92,11 +91,12 @@ type PatreonCommunityPosts struct {
 	} `json:"meta"`
 }
 
-func patreonDbInit(path string) *sql.DB {
+func patreonDbInit(path string) bool {
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "couldn't open sqlite db: %v\n", err)
 	}
+	defer db.Close()
 
 	sqlCreate := `
 		CREATE TABLE IF NOT EXISTS patreonlog (
@@ -106,10 +106,30 @@ func patreonDbInit(path string) *sql.DB {
 	_, err = db.Exec(sqlCreate)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Couldn't init sqlite db: %v\n", err)
-		return nil
+		return false
 	}
 
 	fmt.Fprintf(os.Stderr, "Database initialized\n")
+
+	return true
+}
+
+var patreonDbInitialized = false
+
+func patreonDbOpen(path string) *sql.DB {
+	if patreonDbInitialized == false {
+		if patreonDbInit(path) == false {
+			fmt.Fprintf(os.Stderr, "db was never initialized, can't open")
+			return nil
+		}
+		patreonDbInitialized = true
+	}
+
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "couldn't open sqlite db: %v\n", err)
+		return nil
+	}
 
 	return db
 }
@@ -141,11 +161,34 @@ func patreonDbSet(db *sql.DB, id string) (bool, error) {
 	return true, nil
 }
 
-func watchPatreon() {
-	posts := getPostIds(patreon_url)
-	db := patreonDbInit(opts.Database)
+func patreonWatch() {
+	db := patreonDbOpen(opts.Database)
+
 	if db == nil {
-		fmt.Fprintf(os.Stderr, "No database, disabling patreon watcher")
+		fmt.Fprintf(os.Stderr, "No database, disabling patreon watcher\n")
+		return
+	}
+	db.Close()
+
+	for {
+		fmt.Fprintf(os.Stderr, "Performing scheduled patreon check\n")
+		patreonCheck(true)
+		time.Sleep(10 * time.Minute)
+	}
+}
+
+// Not sure sqlite bits are threadsafe, so just in case, since this routine
+// shouldn't be called much anyhow
+var patreonCheckMutex = &sync.Mutex{}
+
+func patreonCheck(quiet bool) {
+	patreonCheckMutex.Lock()
+	defer patreonCheckMutex.Unlock()
+
+	posts := getPostIds(patreon_url)
+	db := patreonDbOpen(opts.Database)
+	if db == nil {
+		fmt.Fprintf(os.Stderr, "Can't open database, not running patreon check\n")
 		return
 	}
 	defer db.Close()
@@ -165,10 +208,10 @@ func watchPatreon() {
 		}
 	}
 
-	if count == 0 {
+	if count == 0 && quiet == false {
 		for _, ch := range announceChannels {
 			sendFormatted(dg, getChannelByName(ch.GuildName, ch.ChannelName).ChannelId,
-				"No new Patreon community posts to report!")
+				"Manual check: No new Patreon community posts to report!")
 		}
 	}
 }
@@ -198,9 +241,6 @@ func getPostIds(url string) []string {
 	for _, v := range p.Data {
 		ret = append(ret, v.ID)
 	}
-	// spew.Dump(zot.Data[0])
-	fmt.Printf("Returning:\n")
-	spew.Dump(ret)
 
 	return ret
 }
