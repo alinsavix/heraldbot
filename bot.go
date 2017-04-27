@@ -342,6 +342,7 @@ var commandTable = map[string]commandEntry{
 	"help":    {cmdHelp, false},
 	"debug":   {cmdDebug, true},
 	"patreon": {cmdPatreon, true},
+	"die":     {cmdDie, true},
 }
 
 func cmdPing(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
@@ -365,6 +366,12 @@ func cmdDebug(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, rema
 	//    sendFormatted(s, m.ChannelID, "```\n%s\n```\n", sspew.Sprint(m))
 
 	// spew.Dump(m)
+}
+
+func cmdDie(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
+	sendFormatted(s, m.ChannelID, "Goodbye cruel world!")
+	cleanup()
+	os.Exit(0)
 }
 
 func cmdPatreon(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
