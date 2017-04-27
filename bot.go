@@ -123,7 +123,6 @@ func main() {
 	//	a, err := dg.Applications()
 	//	spew.Dump(a)
 
-	// _, _ = dg.ChannelMessageSend("306187245986119691", "HeraldBot reporting for duty!")
 	time.Sleep(2 * time.Second)
 	// spew.Dump(channelsByName)
 	q := getChannelByName("WWP", "general")
@@ -132,14 +131,18 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("Trying to write to channel id %s\n", q.ChannelId)
-	_, _ = dg.ChannelMessageSend(q.ChannelId, "Hi")
-	_, _ = dg.ChannelMessageSend("306187245986119691", "https://www.youtube.com/watch?v=CEH2HyVnKQM")
+	sendFormatted(dg, q.ChannelId, "HeraldBot **%s** reporting for duty!", version)
+
+	// _, _ = dg.ChannelMessageSend(q.ChannelId, "Hi")
+	// _, _ = dg.ChannelMessageSend("306187245986119691", "https://www.youtube.com/watch?v=CEH2HyVnKQM")
 
 	// spew.Dump(channelsById)
 
 	fmt.Printf("Bot running, press CTRL-C to exit\n")
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	// 	watchPatreon()
 
 	<-c
 	cleanup()
@@ -358,10 +361,11 @@ func sendFormatted(s *discordgo.Session, cid string, format string, vals ...inte
 type commandHandler func(*discordgo.Session, *discordgo.MessageCreate, string, string)
 
 var commandTable = map[string]commandHandler{
-	"ping":  cmdPing,
-	"pong":  cmdPong,
-	"help":  cmdHelp,
-	"debug": cmdDebug,
+	"ping":    cmdPing,
+	"pong":    cmdPong,
+	"help":    cmdHelp,
+	"debug":   cmdDebug,
+	"patreon": cmdPatreon,
 }
 
 func cmdPing(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
@@ -385,4 +389,8 @@ func cmdDebug(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, rema
 	//    sendFormatted(s, m.ChannelID, "```\n%s\n```\n", sspew.Sprint(m))
 
 	spew.Dump(m)
+}
+
+func cmdPatreon(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
+	watchPatreon()
 }
