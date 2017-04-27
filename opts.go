@@ -9,10 +9,11 @@ import (
 )
 
 var opts struct {
-	Token            string   `long:"token" short:"t" default:"" descrioption:"Bot token to authenticate with"`
+	Token            string   `long:"token" short:"t" default:"" description:"Bot token to authenticate with"`
 	Admins           []string `long:"admin" short:"a" description:"Bot admins"`
 	ChannelsListen   []string `long:"channel-listen" description:"Channels to interact with"`
 	ChannelsAnnounce []string `long:"channel-announce" description:"Channels to announce things to"`
+	Database         string   `long:"database" short:"d" default:"./herald.db" description:"Database file to use"`
 }
 
 var botAnnounceChannels = []string{}

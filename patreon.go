@@ -143,7 +143,7 @@ func patreonDbSet(db *sql.DB, id string) (bool, error) {
 
 func watchPatreon() {
 	posts := getPostIds(patreon_url)
-	db := patreonDbInit("./herald.db")
+	db := patreonDbInit(opts.Database)
 	if db == nil {
 		fmt.Fprintf(os.Stderr, "No database, disabling patreon watcher")
 		return
