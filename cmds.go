@@ -18,8 +18,9 @@ var commandTable = map[string]commandEntry{
 	"pong":    {cmdPong, false},
 	"help":    {cmdHelp, false},
 	"debug":   {cmdDebug, true},
-	"patreon": {cmdPatreon, true},
 	"die":     {cmdDie, true},
+	"say":     {cmdSay, true},
+	"patreon": {cmdPatreon, true},
 }
 
 func cmdPing(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
@@ -49,6 +50,13 @@ func cmdDie(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain
 	sendFormatted(s, m.ChannelID, "Goodbye cruel world!")
 	cleanup()
 	os.Exit(0)
+}
+
+func cmdSay(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
+	for _, ch := range announceChannels {
+		sendFormatted(dg, getChannelByName(ch.GuildName, ch.ChannelName).ChannelId,
+			remain)
+	}
 }
 
 func cmdPatreon(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
