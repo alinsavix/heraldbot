@@ -3,3 +3,12 @@ postings there onto her discord channel, since there's no other way to
 get automatic notifications for them.
 
 Kinda crappy code by a kinda crappy wuff, but it works, more or less.
+
+Add the bot to your server by filling in the right spot on this URL and
+clicking it (and authorizing):
+
+    https://discordapp.com/api/oauth2/authorize?client_id=YOUR_BOT_CLIENT_ID&scope=bot&permissions=0x00004C40
+
+And run via something like:
+
+    heraldbot --token 'discord_bot_token_here' --channel-listen jaguarholt:general --channel-announce jaguarholt:general --admin alinsa#9054 --admin mcahogarth#8422 --database /home/heraldbot/heraldbot.db
