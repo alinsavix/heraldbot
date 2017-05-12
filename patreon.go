@@ -7,7 +7,6 @@ import (
 	"html"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"regexp"
 	"sync"
 	"time"
@@ -20,116 +19,11 @@ import (
 // out from underneath us at some point.
 var patreon_url = `https://api.patreon.com/stream?include=user.null%2Cattachments.null%2Cuser_defined_tags.null%2Ccampaign.earnings_visibility%2Cpoll&fields[post]=change_visibility_at%2Ccomment_count%2Ccontent%2Ccurrent_user_can_delete%2Ccurrent_user_can_view%2Ccurrent_user_has_liked%2Cearly_access_min_cents%2Cembed%2Cimage%2Cis_paid%2Clike_count%2Cmin_cents_pledged_to_view%2Cpost_file%2Cpublished_at%2Cpatron_count%2Cpatreon_url%2Cpost_type%2Cpledge_url%2Cthumbnail_url%2Ctitle%2Cupgrade_url%2Curl&fields[user]=image_url%2Cfull_name%2Curl&fields[campaign]=earnings_visibility&page[cursor]=null&filter[is_by_creator]=false&filter[is_following]=false&filter[contains_exclusive_posts]=false&filter[creator_id]=136449&json-api-version=1.0`
 
-// Courtesy https://mholt.github.io/json-to-go/
-type PatreonUser struct {
-	Data struct {
-		About     string      `json:"about"`
-		Created   time.Time   `json:"created"`
-		Facebook  interface{} `json:"facebook"`
-		FirstName string      `json:"first_name"`
-		FullName  string      `json:"full_name"`
-		Gender    int         `json:"gender"`
-		ID        string      `json:"id"`
-		ImageURL  string      `json:"image_url"`
-		LastName  string      `json:"last_name"`
-		Links     struct {
-			Campaign struct {
-				ID interface{} `json:"id"`
-			} `json:"campaign"`
-		} `json:"links"`
-		ThumbURL string      `json:"thumb_url"`
-		Twitch   interface{} `json:"twitch"`
-		Twitter  interface{} `json:"twitter"`
-		Type     string      `json:"type"`
-		URL      string      `json:"url"`
-		Vanity   interface{} `json:"vanity"`
-		Youtube  interface{} `json:"youtube"`
-	} `json:"data"`
-	Links struct {
-		Self string `json:"self"`
-	} `json:"links"`
-}
-
-type Attributes struct {
-	ChangeVisibilityAt    interface{} `json:"change_visibility_at"`
-	CommentCount          int         `json:"comment_count"`
-	Content               string      `json:"content"`
-	CurrentUserCanDelete  bool        `json:"current_user_can_delete"`
-	CurrentUserCanView    bool        `json:"current_user_can_view"`
-	CurrentUserHasLiked   bool        `json:"current_user_has_liked"`
-	EarlyAccessMinCents   interface{} `json:"early_access_min_cents"`
-	Embed                 interface{} `json:"embed"`
-	Image                 interface{} `json:"image"`
-	IsPaid                bool        `json:"is_paid"`
-	LikeCount             int         `json:"like_count"`
-	MinCentsPledgedToView int         `json:"min_cents_pledged_to_view"`
-	PatreonURL            string      `json:"patreon_url"`
-	PatronCount           interface{} `json:"patron_count"`
-	PledgeURL             string      `json:"pledge_url"`
-	PostFile              interface{} `json:"post_file"`
-	PostType              string      `json:"post_type"`
-	PublishedAt           time.Time   `json:"published_at"`
-	Title                 string      `json:"title"`
-	UpgradeURL            string      `json:"upgrade_url"`
-	URL                   string      `json:"url"`
-	UserId                string
-}
-
-type PatreonCommunityPosts struct {
-	Data []struct {
-		Attributes    `json:"attributes"`
-		ID            string `json:"id"`
-		Relationships struct {
-			Attachments struct {
-				Data []interface{} `json:"data"`
-			} `json:"attachments"`
-			Campaign struct {
-				Data struct {
-					ID   string `json:"id"`
-					Type string `json:"type"`
-				} `json:"data"`
-				Links struct {
-					Related string `json:"related"`
-				} `json:"links"`
-			} `json:"campaign"`
-			Poll struct {
-				Data interface{} `json:"data"`
-			} `json:"poll"`
-			User struct {
-				Data struct {
-					ID   string `json:"id"`
-					Type string `json:"type"`
-				} `json:"data"`
-				Links struct {
-					Related string `json:"related"`
-				} `json:"links"`
-			} `json:"user"`
-			UserDefinedTags struct {
-				Data []interface{} `json:"data"`
-			} `json:"user_defined_tags"`
-		} `json:"relationships"`
-		Type string `json:"type"`
-	} `json:"data"`
-	Included []struct {
-		Attributes struct {
-			EarningsVisibility string `json:"earnings_visibility"`
-		} `json:"attributes"`
-		ID   string `json:"id"`
-		Type string `json:"type"`
-	} `json:"included"`
-	Links struct {
-		First string `json:"first"`
-		Next  string `json:"next"`
-	} `json:"links"`
-	Meta struct {
-		PostsCount int `json:"posts_count"`
-	} `json:"meta"`
-}
-
+// Set up database and create tables that don't exist
 func patreonDbInit(path string) bool {
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "couldn't open sqlite db: %v\n", err)
+		log("couldn't open sqlite db: %v\n", err)
 	}
 	defer db.Close()
 
@@ -140,21 +34,22 @@ func patreonDbInit(path string) bool {
 		)`
 	_, err = db.Exec(sqlCreate)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Couldn't init sqlite db: %v\n", err)
+		log("Couldn't init sqlite db: %v\n", err)
 		return false
 	}
 
-	fmt.Fprintf(os.Stderr, "Database initialized\n")
+	log("Database initialized\n")
 
 	return true
 }
 
-var patreonDbInitialized = false
+var patreonDbInitialized = false // Only need to initialize db once per run
 
+// Open the database for use
 func patreonDbOpen(path string) *sql.DB {
 	if patreonDbInitialized == false {
 		if patreonDbInit(path) == false {
-			fmt.Fprintf(os.Stderr, "db was never initialized, can't open")
+			log("db was never initialized, can't open")
 			return nil
 		}
 		patreonDbInitialized = true
@@ -162,19 +57,20 @@ func patreonDbOpen(path string) *sql.DB {
 
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "couldn't open sqlite db: %v\n", err)
+		log("couldn't open sqlite db: %v\n", err)
 		return nil
 	}
 
 	return db
 }
 
+// Check to see if we've already seen a patreon post with a given id
 func patreonDbCheck(db *sql.DB, id string) (bool, error) {
 	var count int
 
 	err := db.QueryRow("SELECT COUNT(postid) AS rowcount FROM patreonlog WHERE postid=?", id).Scan(&count)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "patreonDbCheck failed: %v\n", err)
+		log("patreonDbCheck failed: %v\n", err)
 		return false, err
 	}
 
@@ -185,27 +81,31 @@ func patreonDbCheck(db *sql.DB, id string) (bool, error) {
 	return false, nil
 }
 
+// Mark a given post id as having been seen
 func patreonDbSet(db *sql.DB, id string) (bool, error) {
 	_, err := db.Exec("INSERT INTO patreonlog (postid) VALUES(?)", id)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "patreonDbSet failed: %v\n", err)
+		log("patreonDbSet failed: %v\n", err)
 		return false, err
 	}
 
 	return true, nil
 }
 
+// Sit in a loop and check patreon every 10 minutes for new community postings
+//
+// FIXME: The time delay should really be configurable
 func patreonWatch() {
 	db := patreonDbOpen(opts.Database)
 	if db == nil {
-		fmt.Fprintf(os.Stderr, "No database, disabling patreon watcher\n")
+		log("No database, disabling patreon watcher\n")
 		return
 	}
 	db.Close()
 
 	for {
-		fmt.Fprintf(os.Stderr, "Performing scheduled patreon check\n")
+		log("Performing scheduled patreon check\n")
 		patreonCheck(true)
 		time.Sleep(10 * time.Minute)
 	}
@@ -216,6 +116,9 @@ var reHtmlBr = regexp.MustCompile(`(?i)<br/?>`)
 var reHtmlP = regexp.MustCompile(`(?i)<p/?>`)
 var reMultiLinefeed = regexp.MustCompile(`\n\n+`)
 
+// This is ugly and stupid, but basically format things for display. There's
+// probably a far better way to do this, really, but I don't know what it is
+// off the top of my head.
 func patreonDiscordFormat(post Attributes) (string, *discordgo.MessageEmbed) {
 	u := getUserById(post.UserId)
 	name := ""
@@ -227,11 +130,6 @@ func patreonDiscordFormat(post Attributes) (string, *discordgo.MessageEmbed) {
 	if post.Title != "" {
 		title = post.Title
 	}
-	//	 else {
-	//		title = post.URL
-	//	}
-
-	// spew.Dump(post.Content)
 
 	content := reHtmlBr.ReplaceAllLiteralString(post.Content, "\n")
 	content = reHtmlP.ReplaceAllLiteralString(content, "\n\n")
@@ -251,10 +149,6 @@ func patreonDiscordFormat(post Attributes) (string, *discordgo.MessageEmbed) {
 		"Hear ye, hear ye! There is a new Patreon community "+
 			"wall post from **%s**!", name)
 
-	// sendFormatted(dg, getChannelByName(ch.GuildName, ch.ChannelName).ChannelId,
-	// 	"Hear ye, hear ye, there is a new Patreon community wall post:\n"+
-	// 		"https://www.patreon.com/posts/%s", id)
-
 	em := &discordgo.MessageEmbed{
 		Description: content,
 		URL:         post.URL,
@@ -272,6 +166,8 @@ func patreonDiscordFormat(post Attributes) (string, *discordgo.MessageEmbed) {
 // shouldn't be called much anyhow
 var patreonCheckMutex = &sync.Mutex{}
 
+// Perform actual patreon check. The "quiet" flag means it won't announce
+// zero-new-messages to the public
 func patreonCheck(quiet bool) {
 	patreonCheckMutex.Lock()
 	defer patreonCheckMutex.Unlock()
@@ -279,21 +175,20 @@ func patreonCheck(quiet bool) {
 	posts := getPosts(patreon_url)
 	db := patreonDbOpen(opts.Database)
 	if db == nil {
-		fmt.Fprintf(os.Stderr, "Can't open database, not running patreon check\n")
+		log("Can't open database, not running patreon check\n")
 		return
 	}
 	defer db.Close()
 
 	count := 0
 	for id, p := range posts {
-		//		fmt.Fprintf(os.Stderr, "%s\n\n", spew.Sdump(p))
 		check, err := patreonDbCheck(db, id)
 		if err == nil && check == false {
 			if count > 0 { // If we're doing a lot, space them out
 				time.Sleep(5 * time.Second)
 			}
 			patreonDbSet(db, id)
-			fmt.Fprintf(os.Stderr, "Haven't seen post id %s before, announcing\n", id)
+			log("Haven't seen post id %s before, announcing\n", id)
 
 			ann, emb := patreonDiscordFormat(p)
 			for _, ch := range announceChannels {
@@ -312,10 +207,11 @@ func patreonCheck(quiet bool) {
 	}
 }
 
+// Get current community posts from patreon
 func getPosts(url string) map[string]Attributes {
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "url fetch error: request: %v\n", err)
+		log("url fetch error: request: %v\n", err)
 		return nil
 	}
 
@@ -323,7 +219,7 @@ func getPosts(url string) map[string]Attributes {
 	resp.Body.Close()
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "url fetch error: reading: %v\n", err)
+		log("url fetch error: reading: %v\n", err)
 		return nil
 	}
 
@@ -334,7 +230,9 @@ func getPosts(url string) map[string]Attributes {
 
 	ret := make(map[string]Attributes)
 	for _, v := range p.Data {
-		// fmt.Fprintf(os.Stderr, "%s\n\n", spew.Sdump())
+		// We mostly just want the Attributes structure, so we cheat and
+		// add a field to it for the posting user's ID, rather than
+		// including everything else we don't care about
 		v.Attributes.UserId = v.Relationships.User.Data.ID
 		ret[v.ID] = v.Attributes
 	}
@@ -342,12 +240,13 @@ func getPosts(url string) map[string]Attributes {
 	return ret
 }
 
+// Get a patreon user's info, based on patreon user id
 func getUserById(id string) *PatreonUser {
 	url := fmt.Sprintf("https://api.patreon.com/user/%s", id)
 
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "url fetch error: request: %v\n", err)
+		log("url fetch error: request: %v\n", err)
 		return nil
 	}
 
@@ -355,7 +254,7 @@ func getUserById(id string) *PatreonUser {
 	resp.Body.Close()
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "url fetch error: reading: %v\n", err)
+		log("url fetch error: reading: %v\n", err)
 		return nil
 	}
 
@@ -363,7 +262,7 @@ func getUserById(id string) *PatreonUser {
 	err = json.Unmarshal(body, &u)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "couldn't unmarshal json user response: %v\n", err)
+		log("couldn't unmarshal json user response: %v\n", err)
 		return nil
 	}
 

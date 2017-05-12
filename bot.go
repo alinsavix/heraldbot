@@ -10,10 +10,9 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/davecgh/go-spew/spew"
 )
 
-var version string
+var version string // filled at build tie
 
 func check(e error) {
 	if e != nil {
@@ -21,8 +20,15 @@ func check(e error) {
 	}
 }
 
-var BotID string
+var BotID string // who we are, so we avid loops
 
+// Guild name & ID mappings
+type GuildInfo struct {
+	GuildName string
+	GuildId   string
+}
+
+// Channel name & id mappings
 type ChannelInfo struct {
 	Guild       *GuildInfo
 	ChannelName string
@@ -30,37 +36,28 @@ type ChannelInfo struct {
 	IsPrivate   bool
 }
 
-type GuildInfo struct {
-	GuildName string
-	GuildId   string
-}
-
+// channel names (server + channel name)
 type cn struct {
 	GuildName   string
 	ChannelName string
 }
 
+// usernames (name + discriminator)
 type un struct {
 	UserName string
 	UserDisc string
 }
 
+// Caches for converting names & ids
 var channelsById = map[string]*ChannelInfo{}
 var channelsByName = map[cn]*ChannelInfo{}
 var guildsById = map[string]*GuildInfo{}
 var guildsByName = map[string]*GuildInfo{}
 
-var validChannels = map[cn]bool{
-// cn{"WWP", "general"}: true,
-}
+var validChannels = map[cn]bool{} // channels the bot should use
+var validAdmins = map[un]bool{}   // people who can use admin-only cmds
+var announceChannels = []cn{}     // channels announcements should be done in
 
-var validAdmins = map[un]bool{
-// ch{"Alinsa", "1234"}: true,
-}
-
-var announceChannels = []cn{
-// cn{"WWP", "general"},
-}
 var dg *discordgo.Session
 
 func cleanup() {
@@ -71,6 +68,17 @@ func cleanup() {
 	}
 }
 
+func log(format string, vals ...interface{}) {
+	logmsg := fmt.Sprintf(format, vals...)
+	fmt.Fprint(os.Stderr, logmsg)
+}
+
+// For whatever reason, sometimes connecting to discord never gives a
+// READY frame, so... open connection, wait a second, see if we have
+// a ready frame or not, and if we haven't within 5 seconds, fail.
+//
+// There's probably a more correct way to do this (e.g. we don't have a
+// mutex, etc), but this should be sufficient for our simple use case.
 var discordReady = false
 
 func tryOpen(d *discordgo.Session) bool {
@@ -96,11 +104,12 @@ func main() {
 	var err error
 	initopts()
 
+	// Give us a dummy version string if build process didn't give us one
 	if version == "" {
 		version = "[unknown version]"
 	}
 
-	fmt.Printf("HeraldBot %s starting up...\n", version)
+	log("HeraldBot %s starting up...\n", version)
 	dg, err = discordgo.New("Bot " + opts.Token)
 	check(err)
 
@@ -108,19 +117,16 @@ func main() {
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(guildCreate)
 
-	// err = dg.Open()
-	// check(err)
-
 	for i := 0; i <= 10; i++ {
 		if tryOpen(dg) {
 			break
 		} else {
-			fmt.Fprintf(os.Stderr, "Didn't get a Ready frame from discord in a reasonable time\n")
+			log("Didn't get a Ready frame from discord in a reasonable time\n")
 		}
 	}
 
 	if discordReady == false {
-		fmt.Fprintf(os.Stderr, "Couldn't connect to Discord after many retries, exiting.\n")
+		log("Couldn't connect to Discord after many retries, exiting.\n")
 		os.Exit(1)
 	}
 
@@ -129,26 +135,19 @@ func main() {
 
 	BotID = u.ID
 
-	// q := getChannelByName("WWP", "general")
-	// if q == nil {
-	// 	fmt.Printf("Couldn't find channel to emote to\n")
-	// 	os.Exit(1)
-	// }
-	// fmt.Printf("Trying to write to channel id %s\n", q.ChannelId)
-	// sendFormatted(dg, q.ChannelId, "HeraldBot **%s** reporting for duty!", version)
+	go patreonWatch() // watch the patreon site for changes
+	log("Bot running, press CTRL-C to exit\n")
 
-	go patreonWatch()
-	fmt.Fprintf(os.Stderr, "Bot running, press CTRL-C to exit\n")
+	// Set up so we can exit on term signal/etc
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
-	// 	watchPatreon()
-
-	<-c
+	<-c // Wait 'forever' and let everything else do its thing
 	cleanup()
 	os.Exit(0)
 }
 
+// Given guild ID, get the rest of the guild info
 func getGuildById(gid string) *GuildInfo {
 	if g, ok := guildsById[gid]; ok {
 		return g
@@ -165,7 +164,7 @@ func getGuildById(gid string) *GuildInfo {
 
 	g, err := dg.Guild(gid)
 	if err != nil {
-		fmt.Printf("getGuildById couldn't get guild info for guild id %s\n", gid)
+		log("getGuildById couldn't get guild info for guild id %s\n", gid)
 		return nil
 	}
 
@@ -180,6 +179,7 @@ func getGuildById(gid string) *GuildInfo {
 	return gi
 }
 
+// Given a guild name and channel name, get the full channel info
 func getChannelByName(guild string, channel string) *ChannelInfo {
 	if c, ok := channelsByName[cn{guild, channel}]; ok {
 		return c
@@ -188,6 +188,7 @@ func getChannelByName(guild string, channel string) *ChannelInfo {
 	return nil
 }
 
+// Given a channel id, get the full channel info
 func getChannelById(cid string) *ChannelInfo {
 	if c, ok := channelsById[cid]; ok {
 		return c
@@ -195,13 +196,13 @@ func getChannelById(cid string) *ChannelInfo {
 
 	c, err := dg.Channel(cid)
 	if err != nil {
-		fmt.Printf("getChannelById couldn't get channel info for channel id %s\n", cid)
+		log("getChannelById couldn't get channel info for channel id %s\n", cid)
 		return nil
 	}
 
 	g := getGuildById(c.GuildID)
 	if g == nil {
-		fmt.Printf("Couldn't get guild info for channel")
+		log("Channel couldn't get guild info for guild id %s\n", c.GuildID)
 		return nil
 	}
 
@@ -218,18 +219,18 @@ func getChannelById(cid string) *ChannelInfo {
 	return ci
 }
 
+// Used when server info is provided to us via either initial READY or
+// follow-on messages
 func doGuild(g *discordgo.Guild) {
-	fmt.Printf("Identified guild '%s' (id=%s)\n", g.Name, g.ID)
+	log("Identified guild '%s' (id=%s)\n", g.Name, g.ID)
 	for _, c := range g.Channels {
 		if c.Name == "" || c.ID == "" {
-			fmt.Printf("Didn't get valid Channels structure back from discord\n")
+			log("Didn't get valid Channels structure back from discord\n")
 			continue
 		}
-
-		fmt.Printf("  Identified channel '%s' (id=%s)\n", c.Name, c.ID)
+		log("  Identified channel '%s' (id=%s)\n", c.Name, c.ID)
 
 		// This is pretty sloppy, but it'll do for now
-
 		gi := getGuildById(g.ID)
 		ci := getChannelById(c.ID)
 
@@ -245,17 +246,14 @@ func doGuild(g *discordgo.Guild) {
 	}
 }
 
+// Process incoming READY event (basically, when we connect)
 func readyEvent(s *discordgo.Session, r *discordgo.Ready) {
-	fmt.Printf("Handling 'Ready' event\n")
-	// fmt.Printf("One: \n")
-	// spew.Dump(r)
-	// fmt.Printf("Two: \n")
-	// spew.Dump(r.Guilds)
+	log("Handling 'Ready' event\n")
+
 	discordReady = true
 	for _, g := range r.Guilds {
-		// spew.Dump(g)
 		if g.Name == "" || g.ID == "" {
-			fmt.Printf("Ready message had invalid Guilds, assuming GuildCreate events are incoming\n")
+			log("Ready message had invalid Guilds, assuming GuildCreate events are incoming\n")
 			continue
 		}
 		doGuild(g)
@@ -264,13 +262,13 @@ func readyEvent(s *discordgo.Session, r *discordgo.Ready) {
 	//	spew.Dump(channelsById)
 }
 
+// Process incoing GuildCreate event
 func guildCreate(s *discordgo.Session, g *discordgo.GuildCreate) {
-	fmt.Printf("Handling 'GuildCreate' event\n")
+	log("Handling 'GuildCreate' event\n")
 	doGuild(g.Guild)
-	//	spew.Dump(channelsById)
-	//	spew.Dump(channelsByName)
 }
 
+// Is the user specified an admin?
 func checkAdmin(user un) bool {
 	if _, ok := validAdmins[user]; ok {
 		return true
@@ -279,8 +277,11 @@ func checkAdmin(user un) bool {
 	return false
 }
 
+// How I identify messages to me (hardcoded for now, though this should
+// really configurable)
 var reChannelMsgToMe = regexp.MustCompile(`(?i)^\s*(!herald)(?:bot)?$`)
 
+// Handle 'MessageCreate' events (i.e. new messages to channel or bot)
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == BotID {
 		return
@@ -292,14 +293,9 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if c.IsPrivate == true {
 		priv = " (private)"
 	}
-	fmt.Printf("Handling 'MessageCreate' event, channel: %s%s\n", m.ChannelID, priv)
+	log("Handling 'MessageCreate' event, channel: %s%s\n", m.ChannelID, priv)
 
-	// fmt.Printf("Handling MessageCreate event\n")
-	//	spew.Dump(m)
-	// z, _ := dg.Channel(m.ChannelID)
-	// spew.Dump(z)
-	// spew.Dump(channelsById)
-
+	// This little bit is pretty ugly.
 	var cmd string
 	var remain string
 
@@ -316,7 +312,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		// Not private -- is it on a channel we monitor?
 		ch := cn{c.Guild.GuildName, c.ChannelName}
 		if _, ok := validChannels[ch]; !ok {
-			fmt.Printf("Recieved message on unwatched channel: %s:%s\n",
+			log("Recieved message on unwatched channel: %s:%s\n",
 				c.Guild.GuildName, c.ChannelName)
 			return
 		}
@@ -334,9 +330,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
+	// Dispatch command
 	if f, ok := commandTable[cmd]; ok {
 		if f.adminOnly == true && !checkAdmin(un{m.Author.Username, m.Author.Discriminator}) {
-			fmt.Fprintf(os.Stderr, "Priv'd command %s attempted by unpriv'd user %s#%s\n",
+			log("Priv'd command %s attempted by unpriv'd user %s#%s\n",
 				cmd, m.Author.Username, m.Author.Discriminator)
 			return
 		}
@@ -349,54 +346,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 func sendFormatted(s *discordgo.Session, cid string, format string, vals ...interface{}) {
 	_, err := s.ChannelMessageSend(cid, fmt.Sprintf(format, vals...))
 	if err != nil {
-		fmt.Printf("sendFormatted: Failed to send message: %s\n", err)
+		log("sendFormatted: Failed to send message: %s\n", err)
 	}
-}
-
-type commandHandler func(*discordgo.Session, *discordgo.MessageCreate, string, string)
-type commandEntry struct {
-	handler   commandHandler
-	adminOnly bool
-}
-
-var commandTable = map[string]commandEntry{
-	"ping":    {cmdPing, false},
-	"pong":    {cmdPong, false},
-	"help":    {cmdHelp, false},
-	"debug":   {cmdDebug, true},
-	"patreon": {cmdPatreon, true},
-	"die":     {cmdDie, true},
-}
-
-func cmdPing(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	sendFormatted(s, m.ChannelID, "Pong!")
-}
-
-func cmdPong(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	sendFormatted(s, m.ChannelID, "Ping!")
-}
-
-func cmdHelp(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	sendFormatted(s, m.ChannelID, "HeraldBot **%s** reporting for duty!\n\n"+
-		"Sorry, but so far, I am helpless.\n", version)
-}
-
-func cmdDebug(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	//    msg := fmt.Sprintf("Debug output for HeraldBot **%s**\n\n", version)
-	//	_, _ = s.ChannelMessageSend(m.ChannelID, "Ping!")
-	sendFormatted(s, m.ChannelID, "Debug for %s\n\n", version)
-	sendFormatted(s, m.ChannelID, "```Go\n%s\n```\n", spew.Sdump(m))
-	//    sendFormatted(s, m.ChannelID, "```\n%s\n```\n", sspew.Sprint(m))
-
-	// spew.Dump(m)
-}
-
-func cmdDie(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	sendFormatted(s, m.ChannelID, "Goodbye cruel world!")
-	cleanup()
-	os.Exit(0)
-}
-
-func cmdPatreon(s *discordgo.Session, m *discordgo.MessageCreate, cmd string, remain string) {
-	patreonCheck(false)
 }
