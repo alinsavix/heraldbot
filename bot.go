@@ -293,7 +293,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if c.IsPrivate == true {
 		priv = " (private)"
 	}
-	log("Handling 'MessageCreate' event, channel: %s%s\n", m.ChannelID, priv)
+	log("Handling 'MessageCreate' event, user: %s, channel: %s%s\n", m.Author.Username, m.ChannelID, priv)
+	log("Message: %s\n", m.Content)
 
 	// This little bit is pretty ugly.
 	var cmd string
